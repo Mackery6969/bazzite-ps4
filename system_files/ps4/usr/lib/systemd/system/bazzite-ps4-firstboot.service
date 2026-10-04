@@ -1,0 +1,11 @@
+[Unit]
+Description=Create the default Bazzite PS4 user
+After=systemd-sysusers.service
+Before=bazzite-autologin.service display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/bazzite-ps4/firstboot
+
+[Install]
+WantedBy=multi-user.target

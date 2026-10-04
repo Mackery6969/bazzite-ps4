@@ -1,0 +1,155 @@
+name: Build PS4 Mesa
+# Rebuilds Terra's Mesa (what bazzite-deck ships) with the PS4 Liverpool/Gladius
+# patch for x86_64 and i686, and publishes the RPMs as a release tagged
+# mesa-<version>-<release>.ps4.fcNN, which Containerfile.ps4 installs from.
+on:
+  schedule:
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild even if a release for this version exists"
+        type: boolean
+        default: false
+  push:
+    branches:
+      - ps4
+    paths:
+      - "spec_files/mesa-ps4/**"
+      - ".github/workflows/build_ps4_mesa.yml"
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  srpm:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    container:
+      image: registry.fedoraproject.org/fedora:44
+    outputs:
+      build: ${{ steps.version.outputs.build }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Install tools
+        run: dnf -y install git rpm-build dnf-plugins-core gh
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Find Terra's Mesa version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          dnf -y install --nogpgcheck \
+            --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' \
+            terra-release-mesa
+          evr="$(dnf -q repoquery --repo=terra-mesa --latest-limit=1 \
+            --queryformat '%{version}-%{release}' mesa-dri-drivers.x86_64)"
+          rel="${evr#*-}"
+          tag="mesa-${evr%%-*}-${rel%.fc*}.ps4.fc${rel##*.fc}"
+          echo "Terra ships ${evr}, release tag ${tag}"
+          echo "evr=${evr}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if gh release view "${tag}" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+              && [[ "${{ inputs.force }}" != "true" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build SRPM
+        if: steps.version.outputs.build == 'true'
+        run: spec_files/mesa-ps4/make-srpm.sh srpm "${{ steps.version.outputs.evr }}"
+
+      - name: Upload SRPM
+        if: steps.version.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: srpm
+          path: srpm/*.src.rpm
+          if-no-files-found: error
+
+  rpms:
+    needs: srpm
+    if: needs.srpm.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        chroot:
+          - fedora-44-x86_64
+          - fedora-44-i386
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
+
+      - name: Download SRPM
+        uses: actions/download-artifact@v4
+        with:
+          name: srpm
+          path: srpm
+
+      - name: Build with mock
+        run: |
+          mkdir -p out
+          docker run --rm --privileged \
+            -v "$PWD/srpm:/srpm:ro" -v "$PWD/out:/out" \
+            registry.fedoraproject.org/fedora:44 bash -c '
+              set -euo pipefail
+              dnf -y install mock
+              useradd -m -G mock builder
+              chown builder /out
+              su builder -c "mock -r ${{ matrix.chroot }} --isolation=simple \
+                --addrepo=https://repos.fyralabs.com/terra44 \
+                --addrepo=https://repos.fyralabs.com/terra44-mesa \
+                --resultdir=/out --rebuild /srpm/*.src.rpm"
+            '
+
+      - name: Upload RPMs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpms-${{ matrix.chroot }}
+          path: |
+            out/*.rpm
+            !out/*.src.rpm
+            !out/*-debuginfo-*.rpm
+            !out/*-debugsource-*.rpm
+          if-no-files-found: error
+
+  release:
+    needs: [srpm, rpms]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Download RPMs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: rpms-*
+          path: rpms
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.srpm.outputs.tag }}
+        run: |
+          gh release delete "${TAG}" --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "${TAG}" rpms/*.rpm \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --latest=false \
+            --title "${TAG}" \
+            --notes "Terra's Mesa with the PS4 Liverpool/Gladius patch (x86_64 + i686). Installed by Containerfile.ps4."
+
+      - name: Rebuild the PS4 image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build_ps4.yml --repo "${{ github.repository }}" --ref ps4

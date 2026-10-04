@@ -1,0 +1,4 @@
+# Run the PS4 GPU (Liverpool/Gladius) at its highest DPM level. A console on
+# mains power gains nothing from downclocking. No effect with amdgpu.dpm=0.
+ACTION=="add|change", SUBSYSTEM=="pci", ATTR{vendor}=="0x1002", ATTR{device}=="0x992[0234]", \
+    TEST=="power_dpm_force_performance_level", ATTR{power_dpm_force_performance_level}="high"

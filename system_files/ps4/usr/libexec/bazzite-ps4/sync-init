@@ -1,0 +1,50 @@
+#!/usr/bin/bash
+# Install or refresh the PS4 boot shim on an ostree sysroot.
+#
+# The shim runs before any deployment is mounted, so it has to live on the
+# physical root next to /ostree. This copies it and a static busybox there and
+# points /sbin/init at it. Run with no arguments on a booted system (as
+# bazzite-ps4-sync-init.service does after updates), or with a sysroot path
+# from the installer.
+
+set -euo pipefail
+
+SYSROOT="${1:-/sysroot}"
+SRC=/usr/libexec/bazzite-ps4/init
+BUSYBOX=/usr/bin/busybox
+
+sync_files() {
+    local dest="${SYSROOT}/bazzite"
+
+    # better-initramfs moves /dev into the new root and the shim mounts /proc
+    # before any deployment exists, so the physical root needs mount points
+    mkdir -p "${dest}/bin" "${SYSROOT}/sbin" "${SYSROOT}"/{dev,proc,run,sys}
+
+    if ! cmp -s "${BUSYBOX}" "${dest}/busybox"; then
+        install -m 0755 "${BUSYBOX}" "${dest}/busybox.new"
+        mv -f "${dest}/busybox.new" "${dest}/busybox"
+        rm -rf "${dest:?}/bin"
+        mkdir -p "${dest}/bin"
+        "${dest}/busybox" --list | while read -r applet; do
+            ln -sf ../busybox "${dest}/bin/${applet}"
+        done
+    fi
+
+    if ! cmp -s "${SRC}" "${dest}/init"; then
+        install -m 0755 "${SRC}" "${dest}/init.new"
+        mv -f "${dest}/init.new" "${dest}/init"
+    fi
+
+    if [[ "$(readlink "${SYSROOT}/sbin/init" || true)" != "../bazzite/init" ]]; then
+        ln -sfn ../bazzite/init "${SYSROOT}/sbin/init"
+    fi
+}
+
+if [[ "${SYSROOT}" == /sysroot ]] && findmnt -n -o OPTIONS /sysroot | grep -qw ro; then
+    # /sysroot is read-only on a booted system; write from a private namespace
+    export -f sync_files
+    export SYSROOT SRC BUSYBOX
+    exec unshare -m bash -c 'mount -o remount,rw /sysroot && sync_files'
+fi
+
+sync_files

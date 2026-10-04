@@ -1,0 +1,80 @@
+name: Build Bazzite PS4
+# Layers Containerfile.ps4 on the published bazzite-deck image. The scheduled
+# run only rebuilds when upstream has pushed a new bazzite-deck.
+on:
+  schedule:
+    - cron: "45 */6 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - ps4
+    paths:
+      - "Containerfile.ps4"
+      - "system_files/ps4/**"
+      - "build_files/**"
+      - ".github/workflows/build_ps4.yml"
+
+env:
+  BASE_IMAGE: ghcr.io/ublue-os/bazzite-deck:stable
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Get lower-case owner
+        id: owner
+        run: echo "lowercase=${OWNER,,}" >> "$GITHUB_OUTPUT"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - name: Check whether upstream changed
+        id: check
+        env:
+          IMAGE: ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-ps4:stable
+        run: |
+          base="$(skopeo inspect --format '{{.Digest}}' "docker://${BASE_IMAGE}")"
+          echo "base_digest=${base}" >> "$GITHUB_OUTPUT"
+          ours="$(skopeo inspect --format '{{index .Labels "org.opencontainers.image.base.digest"}}' "docker://${IMAGE}" 2>/dev/null || true)"
+          echo "upstream ${base}, last built from ${ours:-nothing}"
+          if [[ "${{ github.event_name }}" == "schedule" && "${base}" == "${ours}" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk space
+        if: steps.check.outputs.build == 'true'
+        uses: jlumbroso/free-disk-space@ceedf095f4ec1a097402bc6bd80831f2e1a6fde6 # v2.0.0
+
+      - name: Checkout
+        if: steps.check.outputs.build == 'true'
+        uses: actions/checkout@v5
+
+      - name: Build
+        if: steps.check.outputs.build == 'true'
+        run: |
+          sudo podman build \
+            --file Containerfile.ps4 \
+            --build-arg BASE_IMAGE="${BASE_IMAGE}@${{ steps.check.outputs.base_digest }}" \
+            --build-arg IMAGE_VENDOR="${{ steps.owner.outputs.lowercase }}" \
+            --label org.opencontainers.image.base.digest="${{ steps.check.outputs.base_digest }}" \
+            --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+            --tag bazzite-ps4:stable \
+            .
+
+      - name: Push
+        if: steps.check.outputs.build == 'true' && github.ref == 'refs/heads/ps4'
+        env:
+          IMAGE: ghcr.io/${{ steps.owner.outputs.lowercase }}/bazzite-ps4
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | sudo podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          tag="stable-$(date -u +%Y%m%d)"
+          sudo podman push bazzite-ps4:stable "docker://${IMAGE}:stable"
+          sudo podman push bazzite-ps4:stable "docker://${IMAGE}:${tag}"

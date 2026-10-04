@@ -66,3 +66,13 @@ clean-images:
 # Clean ISOs
 clean-isos:
     @{{ project_root }}/just_scripts/cleanup-dir.sh
+
+# Build the PS4 image locally (PS4_SKIP_MESA=1 skips the patched Mesa swap)
+build-ps4:
+    podman build -f {{ project_root }}/Containerfile.ps4 \
+        --build-arg PS4_SKIP_MESA="${PS4_SKIP_MESA:-}" \
+        -t localhost/bazzite-ps4:stable {{ project_root }}
+
+# Install the PS4 image onto a PS4 Linux root partition (erases it)
+install-ps4 partition image="ghcr.io/mackery6969/bazzite-ps4:stable":
+    @{{ project_root }}/just_scripts/install-ps4.sh {{ partition }} {{ image }}

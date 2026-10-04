@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply the saved PS4 fan threshold temperature
+ConditionPathExists=/dev/icc
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/mkdir -p /var/lib/ps4fancontrol
+ExecStart=/usr/bin/ps4fancontrol
+
+[Install]
+WantedBy=multi-user.target

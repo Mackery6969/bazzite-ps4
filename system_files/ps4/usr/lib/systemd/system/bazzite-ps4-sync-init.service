@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh the PS4 ostree boot shim on the sysroot
+ConditionPathExists=/run/bazzite-ps4/cmdline
+After=ostree-remount.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/bazzite-ps4/sync-init
+
+[Install]
+WantedBy=multi-user.target

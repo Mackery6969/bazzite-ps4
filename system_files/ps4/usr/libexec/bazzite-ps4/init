@@ -1,0 +1,103 @@
+#!/bazzite/busybox sh
+# PS4 Linux ostree boot shim.
+#
+# better-initramfs mounts the "psxitarch" partition and runs `switch_root
+# /newroot /sbin/init`, which lands here as PID 1 with that partition as /.
+# There is no ostree-aware initramfs on the PS4, so this does the job of
+# ostree-prepare-root: pick the newest deployment from the loader entries,
+# bind it into shape, and pivot into it before handing over to systemd.
+#
+# The partition root is the ostree sysroot. This file and a static busybox
+# live in /bazzite with busybox applet links in /bazzite/bin (all synced from
+# the deployment by bazzite-ps4-sync-init), and /sbin/init points here.
+
+BB=/bazzite/busybox
+export PATH=/bazzite/bin
+
+rescue() {
+    $BB echo "bazzite-ps4: $*" >/dev/console
+    $BB echo "bazzite-ps4: dropping to a rescue shell" >/dev/console
+    exec $BB sh </dev/console >/dev/console 2>&1
+}
+
+[ -x /bazzite/bin/mount ] || rescue "/bazzite/bin is missing, re-run the installer"
+
+[ -e /dev/console ] || mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc || rescue "cannot mount /proc"
+
+# better-initramfs may hand us a read-only root; /var and upgrades need rw
+mount -o remount,rw / || rescue "cannot remount / read-write"
+
+# Highest "version" entry is the default deployment, same as ostree's own
+# bootloader backends. `bazzite.entry=N` on the kernel command line forces one.
+entry=""
+want=$(sed -n 's/.*bazzite\.entry=\([0-9]*\).*/\1/p' /proc/cmdline)
+best=-1
+for f in /boot/loader/entries/*.conf; do
+    [ -f "$f" ] || continue
+    v=$(sed -n 's/^version //p' "$f")
+    [ -n "$v" ] || continue
+    if [ -n "$want" ]; then
+        [ "$v" = "$want" ] && entry="$f"
+    elif [ "$v" -gt "$best" ]; then
+        best=$v
+        entry="$f"
+    fi
+done
+[ -n "$entry" ] || rescue "no ostree loader entry found in /boot/loader/entries"
+
+options=$(sed -n 's/^options //p' "$entry")
+ostree_arg=""
+kargs=""
+for arg in $options; do
+    case "$arg" in
+        ostree=*) ostree_arg="$arg" ;;
+        # Device args from the install host do not describe the PS4
+        root=*|rootflags=*|boot=*|rw|ro) ;;
+        *) kargs="$kargs $arg" ;;
+    esac
+done
+[ -n "$ostree_arg" ] || rescue "no ostree= in $entry"
+
+deploy=$(readlink -f "${ostree_arg#ostree=}")
+[ -d "$deploy/usr" ] || rescue "deployment $deploy is missing"
+stateroot_var="${deploy%/deploy/*}/var"
+
+echo "bazzite-ps4: booting $deploy" >/dev/console
+
+# Make the deployment a mount point so it can become the new root
+mount --bind "$deploy" "$deploy" || rescue "cannot bind deployment"
+
+mount --bind "$stateroot_var" "$deploy/var" || rescue "cannot bind /var"
+
+mount --bind "$deploy/usr" "$deploy/usr" || rescue "cannot bind /usr"
+mount -o remount,bind,ro "$deploy/usr" || rescue "cannot make /usr read-only"
+
+# Pre-mount /run and /proc in the new root: systemd keeps existing mounts,
+# which lets the ostree marker and the faked command line survive into it.
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$deploy/run" || rescue "cannot mount /run"
+mkdir -p "$deploy/run/bazzite-ps4/physroot"
+: > "$deploy/run/ostree-booted"
+
+# libostree, bootc and rpm-ostree find the booted deployment through the
+# ostree= karg; the PS4 payload has no way to pass it, so provide it here.
+echo "$(cat /proc/cmdline) $ostree_arg$kargs" > "$deploy/run/bazzite-ps4/cmdline"
+mount -t proc proc "$deploy/proc" || rescue "cannot mount /proc in deployment"
+mount --bind "$deploy/run/bazzite-ps4/cmdline" "$deploy/proc/cmdline" || rescue "cannot fake /proc/cmdline"
+
+mount --move /dev "$deploy/dev" || rescue "cannot move /dev"
+
+umount /proc
+
+# Put the physical root where ostree expects the sysroot
+cd "$deploy" || rescue "cannot enter deployment"
+pivot_root . run/bazzite-ps4/physroot || rescue "pivot_root failed"
+BB=/run/bazzite-ps4/physroot/bazzite/busybox
+/usr/bin/mount --bind /run/bazzite-ps4/physroot /sysroot || rescue "cannot mount /sysroot"
+# /boot is a directory on the same partition; ostree tooling expects the
+# loader entries at /boot like on a normal install
+/usr/bin/mount --bind /sysroot/boot /boot || rescue "cannot mount /boot"
+/usr/bin/mount -o remount,bind,ro /boot
+/usr/bin/mount -o remount,bind,ro /sysroot
+
+exec /usr/lib/systemd/systemd "$@"

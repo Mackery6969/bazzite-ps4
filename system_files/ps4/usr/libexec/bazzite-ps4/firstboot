@@ -1,0 +1,13 @@
+#!/usr/bin/bash
+# There is no installer on the PS4, so create the default account on first boot.
+# bazzite-autologin logs Game Mode in as UID 1000, so the account takes it.
+
+set -euo pipefail
+
+if getent passwd 1000 >/dev/null; then
+    exit 0
+fi
+
+useradd --uid 1000 --create-home --groups wheel --comment "Bazzite" bazzite
+echo 'bazzite:ps4linux' | chpasswd
+echo "Created default user 'bazzite' (password 'ps4linux'); change it with passwd."
