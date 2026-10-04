@@ -59,9 +59,12 @@ jobs:
 
       - name: Build
         if: steps.check.outputs.build == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          sudo podman build \
+          sudo --preserve-env=GITHUB_TOKEN podman build \
             --file Containerfile.ps4 \
+            --secret "id=GITHUB_TOKEN,env=GITHUB_TOKEN" \
             --build-arg BASE_IMAGE="${BASE_IMAGE}@${{ steps.check.outputs.base_digest }}" \
             --build-arg IMAGE_VENDOR="${{ steps.owner.outputs.lowercase }}" \
             --label org.opencontainers.image.base.digest="${{ steps.check.outputs.base_digest }}" \

@@ -32,36 +32,41 @@ ARG PS4_SKIP_MESA="${PS4_SKIP_MESA:-}"
 COPY system_files/ps4/ /
 COPY --from=ps4fancontrol /ps4fancontrol /usr/bin/ps4fancontrol
 
-# Swap Mesa (x86_64 + i686) for the Liverpool/Gladius patched build of the
-# exact same Terra version, published as a release by build_ps4_mesa.yml
+# Swap Mesa (x86_64 + i686) for the newest Liverpool/Gladius patched build of
+# Terra's Mesa, published as mesa-* releases by build_ps4_mesa.yml. Terra only
+# keeps its latest source, so this follows Terra rather than the base image.
 RUN --mount=type=cache,dst=/var/cache \
     --mount=type=cache,dst=/var/cache/libdnf5 \
     --mount=type=cache,dst=/var/log \
     --mount=type=bind,from=ctx,source=/,target=/ctx \
     --mount=type=tmpfs,dst=/tmp \
+    --mount=type=secret,id=GITHUB_TOKEN \
     if [[ -n "${PS4_SKIP_MESA}" ]]; then echo "Skipping PS4 Mesa (test build)"; exit 0; fi && \
-    mesa_ver="$(rpm -q --queryformat '%{VERSION}' mesa-dri-drivers.x86_64)" && \
-    mesa_rel="$(rpm -q --queryformat '%{RELEASE}' mesa-dri-drivers.x86_64)" && \
-    ps4_rel="${mesa_rel%.fc*}.ps4.fc${mesa_rel##*.fc}" && \
-    tag="mesa-${mesa_ver}-${ps4_rel}" && \
+    tag="$(/ctx/ghcurl "https://api.github.com/repos/${PS4_MESA_REPO}/releases?per_page=100" | \
+        jq -r '.[] | select(.tag_name | startswith("mesa-")) | .tag_name' | sort -V | tail -n1)" && \
+    [[ -n "${tag}" ]] || { echo "No mesa-* release in ${PS4_MESA_REPO}; run the 'Build PS4 Mesa' workflow" >&2; exit 1; } && \
+    echo "Using PS4 Mesa ${tag}" && \
     mapfile -t mesa_pkgs < <(rpm -qa --queryformat '%{NAME} %{ARCH}\n' 'mesa-*' | sort -u) && \
     mkdir -p /tmp/mesa && \
     for pkg in "${mesa_pkgs[@]}"; do \
         read -r name arch <<< "${pkg}" && \
-        file="${name}-${mesa_ver}-${ps4_rel}.${arch}.rpm" && \
+        file="${name}-${tag#mesa-}.${arch}.rpm" && \
         curl -fsSL --retry 3 -o "/tmp/mesa/${file}" \
             "https://github.com/${PS4_MESA_REPO}/releases/download/${tag}/${file}" || \
-            { echo "Release ${tag} has no ${file}; run the 'Build PS4 Mesa' workflow for this Terra version" >&2; exit 1; }; \
+            { echo "Release ${tag} has no ${file}" >&2; exit 1; }; \
     done && \
     dnf5 versionlock delete 'mesa-*' && \
     dnf5 -y upgrade /tmp/mesa/*.rpm && \
+    if rpm -qa --queryformat '%{RELEASE}\n' 'mesa-*' | grep -qv '\.ps4'; then \
+        dnf5 -y downgrade /tmp/mesa/*.rpm; \
+    fi && \
     for pkg in "${mesa_pkgs[@]}"; do \
         read -r name arch <<< "${pkg}" && \
         rpm -q --queryformat '%{RELEASE}\n' "${name}.${arch}" | grep -q '\.ps4' || \
             { echo "${name}.${arch} was not replaced by the PS4 build" >&2; exit 1; }; \
     done && \
     dnf5 versionlock add $(rpm -qa --queryformat '%{NAME}\n' 'mesa-*' | sort -u) && \
-    unset -v mesa_ver mesa_rel ps4_rel tag mesa_pkgs pkg name arch file && \
+    unset -v tag mesa_pkgs pkg name arch file && \
     /ctx/cleanup
 
 # PS4 hardware support and boot glue
