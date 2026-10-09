@@ -76,3 +76,11 @@ build-ps4:
 # Install the PS4 image onto a PS4 Linux root partition (erases it)
 install-ps4 partition image="ghcr.io/mackery6969/bazzite-ps4:stable":
     @{{ project_root }}/just_scripts/install-ps4.sh {{ partition }} {{ image }}
+
+# Build bazzite-ps4.ext4.xz for internal PS4 installs (needs sudo)
+build-ps4-image output="bazzite-ps4.ext4.xz" image="ghcr.io/mackery6969/bazzite-ps4:stable":
+    @{{ project_root }}/just_scripts/build-ps4-image.sh {{ output }} {{ image }}
+
+# Build the internal-install initramfs (initramfs-ps4 + install-bazzite.sh)
+build-ps4-initramfs output="initramfs.cpio.gz":
+    @{{ project_root }}/just_scripts/build-ps4-initramfs.sh {{ output }}

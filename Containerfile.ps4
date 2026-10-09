@@ -108,6 +108,7 @@ RUN --mount=type=cache,dst=/var/cache \
     done && unset -v unit && \
     systemctl enable bazzite-ps4-firstboot.service && \
     systemctl enable bazzite-ps4-sync-init.service && \
+    systemctl enable bazzite-ps4-growfs.service && \
     systemctl enable ps4fc.service && \
     /ctx/cleanup
 

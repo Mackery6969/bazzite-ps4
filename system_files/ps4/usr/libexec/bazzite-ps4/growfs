@@ -1,0 +1,31 @@
+#!/usr/bin/bash
+# Grow the root filesystem to fill its device.
+#
+# Internal installs write a minimal-size ext4 image into a preallocated
+# linux.img, so the filesystem starts out much smaller than the loop device
+# backing it. Growing ext4 online is safe; when there is nothing to gain,
+# resize2fs exits without changes.
+
+set -euo pipefail
+
+dev="$(findmnt -n -o SOURCE /sysroot)"
+dev="${dev%%[*}"
+
+if [[ "$(findmnt -n -o FSTYPE /sysroot)" != ext4 || ! -b "${dev}" ]]; then
+    echo "Root is not an ext4 block device (${dev}); nothing to grow."
+    exit 0
+fi
+
+dev_bytes="$(blockdev --getsize64 "${dev}")"
+fs_bytes="$(dumpe2fs -h "${dev}" 2>/dev/null | awk -F: '
+    /^Block count/ { count = $2 }
+    /^Block size/ { size = $2 }
+    END { printf "%d", count * size }')"
+
+# Leave small differences alone
+if (( dev_bytes - fs_bytes < 1024 * 1024 * 1024 )); then
+    exit 0
+fi
+
+echo "Growing ${dev} from $(( fs_bytes >> 30 )) GiB to $(( dev_bytes >> 30 )) GiB"
+resize2fs "${dev}"

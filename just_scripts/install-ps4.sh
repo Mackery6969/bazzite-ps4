@@ -42,35 +42,16 @@ if [[ "${IMAGE}" != localhost/* && "${IMAGE}" != *:/* ]]; then
 fi
 
 sudo mkfs.ext4 -F -L psxitarch "${PART}"
-# bootc requires UUID= mount specs; the PS4 boot shim ignores them anyway
 UUID="$(sudo blkid -s UUID -o value "${PART}")"
 
 MNT="$(mktemp -d)"
 trap 'sudo umount "${MNT}" 2>/dev/null || true; rmdir "${MNT}"' EXIT
 sudo mount "${PART}" "${MNT}"
 
-run_image() {
-    sudo podman run --rm --privileged --pid=host \
-        --security-opt label=type:unconfined_t \
-        -v /var/lib/containers:/var/lib/containers \
-        -v /dev:/dev \
-        -v "${MNT}:/target" \
-        "${IMAGE}" "$@"
-}
-
-run_image bootc install to-filesystem \
-    --bootloader none \
-    --skip-finalize \
-    --root-mount-spec "UUID=${UUID}" \
-    --boot-mount-spec "UUID=${UUID}" \
-    --target-imgref "${TARGET_IMGREF}" \
-    /target
-
-# bootc writes a /boot mount for the boot spec, but /boot is a plain directory
-# on the same partition here; leaving it in fstab sends boot to emergency mode
-run_image bash -c 'sed -i "\| /boot |d" /target/ostree/deploy/*/deploy/*/etc/fstab'
-
-run_image /usr/libexec/bazzite-ps4/sync-init /target
+# shellcheck source=just_scripts/ps4-deploy.sh
+. "$(dirname "$(realpath "$0")")/ps4-deploy.sh"
+deploy_ps4 "${MNT}" "${UUID}" "${IMAGE}" "${TARGET_IMGREF}"
+add_wifi_ps4 "${MNT}"
 
 sudo sync
 echo

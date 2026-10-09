@@ -1,0 +1,34 @@
+# Sourced by initramfs-ps4's init (never `exit` here).
+#
+# Unattended internal install: when /user/system/boot/bazzite-install.conf
+# exists (uploaded over FTP, containing e.g. SIZE=650), install Bazzite with
+# that many GB, then rename the file so it only runs once. Boot then carries on
+# as usual and finds the new linux.img.
+
+if [ -r /key/eap_hdd_key.bin ]; then
+    bazzite_mounted_hdd=''
+    mountpoint -q /ps4hdd || bazzite_mounted_hdd=1
+
+    if bazzite-unlock-hdd.sh; then
+        bazzite_conf=/ps4hdd/system/boot/bazzite-install.conf
+        if [ -r "${bazzite_conf}" ]; then
+            bazzite_size="$(sed -n 's/^SIZE=\([0-9]*\).*/\1/p' "${bazzite_conf}")"
+            mv -f "${bazzite_conf}" "${bazzite_conf}.running"
+            einfo "Found bazzite-install.conf: installing Bazzite with ${bazzite_size} GB."
+            if BAZZITE_AUTO=1 sh /bin/install-bazzite.sh "${bazzite_size}"; then
+                mv -f "${bazzite_conf}.running" /ps4hdd/system/boot/bazzite-install.done
+            else
+                mv -f "${bazzite_conf}.running" /ps4hdd/system/boot/bazzite-install.failed
+                eerror "Automatic Bazzite install failed; see the messages above."
+                rescueshell
+            fi
+        fi
+    fi
+
+    # Leave the drive as init expects it, so its own unlock step runs normally
+    if [ -n "${bazzite_mounted_hdd}" ]; then
+        umount /ps4hdd 2>/dev/null
+        cryptsetup remove ps4hdd 2>/dev/null
+    fi
+    unset bazzite_mounted_hdd bazzite_conf bazzite_size
+fi
