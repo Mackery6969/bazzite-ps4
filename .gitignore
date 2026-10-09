@@ -1,0 +1,4 @@
+
+# PS4 install artifacts (the image can contain WiFi credentials)
+bazzite-ps4.ext4.xz
+initramfs.cpio.gz
