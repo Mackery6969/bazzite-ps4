@@ -37,7 +37,7 @@ jobs:
         run: dnf -y install git rpm-build dnf-plugins-core gh
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Find Terra's Mesa version
         id: version
