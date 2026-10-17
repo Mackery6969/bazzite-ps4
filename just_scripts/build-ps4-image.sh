@@ -27,8 +27,15 @@ MNT="${WORK}/mnt"
 LOOP=""
 
 cleanup() {
-    sudo umount "${MNT}" 2>/dev/null || true
-    [[ -n "${LOOP}" ]] && sudo losetup -d "${LOOP}" 2>/dev/null || true
+    if mountpoint -q "${MNT}" && ! sudo umount "${MNT}"; then
+        # Deleting the backing file now would leave a mount of a deleted file
+        echo "Could not unmount ${MNT}. Clean up later with:" >&2
+        echo "  sudo umount ${MNT} && sudo losetup -d ${LOOP} && rm -rf ${WORK}" >&2
+        return
+    fi
+    if [[ -n "${LOOP}" ]]; then
+        sudo losetup -d "${LOOP}" 2>/dev/null || true
+    fi
     rm -rf "${WORK}"
 }
 trap cleanup EXIT

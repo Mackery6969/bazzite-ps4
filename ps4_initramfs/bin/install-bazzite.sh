@@ -7,9 +7,12 @@
 # appended to, or unattended from the bazzite-autoinstall hook
 # (BAZZITE_AUTO=1: no prompts, and boot continues normally afterwards).
 # Expects /user/system/boot/bazzite-ps4.ext4.xz (uploaded over FTP).
-# linux.img is filled with zeros first so its space is really taken from the
-# PS4 side, then the image is written into it. Bazzite grows the filesystem to
-# the full size on first boot.
+#
+# The image is written to linux.img.new and verified first (xz checks every
+# block, then e2fsck), so a damaged upload leaves the old linux.img alone.
+# Only then is the old image removed and the new one extended with zeros to
+# the full size, so its space is really taken from the PS4 side. Bazzite
+# grows the filesystem to fill it on first boot.
 
 # Provided by initramfs-ps4
 # shellcheck source=/dev/null
@@ -63,18 +66,48 @@ if [ -z "${BAZZITE_AUTO}" ]; then
 fi
 
 umount /newroot 2>/dev/null
-rm -f "${IMAGE}"
+NEW="${IMAGE}.new"
+rm -f "${NEW}"
 
-einfo "Reserving ${size_gb} GB. This writes the whole area once and takes a while"
-einfo "(roughly $(( size_gb * 10 / 60 )) minutes on the stock drive). Don't power off."
-dd if=/dev/zero of="${IMAGE}" bs=1M count=$(( size_gb * 1024 )) || { eerror "Reserving space failed."; exit 1; }
-
-einfo "Writing Bazzite ..."
-xz -dc "${SOURCE}" | dd of="${IMAGE}" bs=1M conv=notrunc || { eerror "Writing the image failed."; exit 1; }
+einfo "Writing and verifying Bazzite ..."
+if ! xz -dc "${SOURCE}" > "${NEW}"; then
+    rm -f "${NEW}"
+    eerror "Writing the image failed: the upload is damaged or the drive is full."
+    eerror "Nothing was changed. Upload bazzite-ps4.ext4.xz again."
+    exit 1
+fi
 sync
 
 einfo "Checking the filesystem ..."
-e2fsck -fn "${IMAGE}" || { eerror "The written filesystem has errors; re-run the installer."; exit 1; }
+if ! e2fsck -fn "${NEW}"; then
+    rm -f "${NEW}"
+    eerror "The written filesystem has errors. Nothing was changed."
+    exit 1
+fi
+
+# The image ends on a 4 KiB block; pad to the next MiB, then add zeros up to
+# the full size in MiB steps
+image_bytes="$(stat -c %s "${NEW}")"
+start_mb=$(( (image_bytes + 1048575) / 1048576 ))
+pad_blocks=$(( start_mb * 256 - image_bytes / 4096 ))
+total_mb=$(( size_gb * 1024 ))
+if [ "${start_mb}" -ge "${total_mb}" ]; then
+    rm -f "${NEW}"
+    eerror "The image (${start_mb} MiB) does not fit in ${size_gb} GB. Nothing was changed."
+    exit 1
+fi
+
+rm -f "${IMAGE}"
+einfo "Reserving ${size_gb} GB. This writes the whole area once and takes a while"
+einfo "(roughly $(( (total_mb - start_mb) / 6000 )) minutes on the stock drive). Don't power off."
+if [ "${pad_blocks}" -gt 0 ]; then
+    dd if=/dev/zero of="${NEW}" bs=4096 seek=$(( image_bytes / 4096 )) count="${pad_blocks}" conv=notrunc 2>/dev/null ||
+        { eerror "Reserving space failed."; exit 1; }
+fi
+dd if=/dev/zero of="${NEW}" bs=1M seek="${start_mb}" count=$(( total_mb - start_mb )) conv=notrunc ||
+    { eerror "Reserving space failed."; exit 1; }
+sync
+mv -f "${NEW}" "${IMAGE}"
 
 einfo "--INSTALL COMPLETE--"
 einfo "Booting Bazzite. First boot grows the filesystem, then Bazzite's setup reboots once."
