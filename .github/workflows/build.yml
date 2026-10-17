@@ -293,6 +293,9 @@ jobs:
 
       # Generate a file with all the build-args passed to buildah
       - name: Prepare build args file
+        env:
+          VERSION_TAG: ${{ steps.labels.outputs.tag }}
+          VERSION_PRETTY: ${{ steps.labels.outputs.pretty }}
         run: |
           cat <<'EOF' >>build_args.txt
           BASE_IMAGE_NAME=${{ steps.base.outputs.base_image_name }}
@@ -306,8 +309,10 @@ jobs:
           NVIDIA_FLAVOR=${{ steps.base.outputs.nvidia_flavor }}
           NVIDIA_BASE=${{ steps.base.outputs.nvidia_base }}
           SHA_HEAD_SHORT=${{ steps.base.outputs.sha_head_short }}
-          VERSION_TAG=${{ steps.labels.outputs.tag }}
-          VERSION_PRETTY=${{ steps.labels.outputs.pretty }}
+          EOF
+          printf 'VERSION_TAG=%s\n' "$VERSION_TAG" >>build_args.txt
+          printf 'VERSION_PRETTY=%s\n' "$VERSION_PRETTY" >>build_args.txt
+          cat <<'EOF' >>build_args.txt
           ARCH=${{ matrix.arch }}
           EOF
 
