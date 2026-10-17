@@ -18,6 +18,9 @@ on:
       - "spec_files/mesa-ps4/**"
       - ".github/workflows/build_ps4_mesa.yml"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
