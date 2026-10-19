@@ -47,7 +47,7 @@ class AddToSteamExtension(GObject.GObject, Nautilus.MenuProvider):
             return []
 
         if not os.access(unquote(file.get_uri()[7:]), os.X_OK):
-            if not mime == "application/x-ms-dos-executable" or not mime == "application/x-msdownload" or not mime == "application/vnd.microsoft.portable-executable":
+            if mime not in ("application/x-ms-dos-executable", "application/x-msdownload", "application/vnd.microsoft.portable-executable"):
                 return []
 
         item = Nautilus.MenuItem(
