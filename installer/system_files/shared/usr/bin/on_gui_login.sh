@@ -259,11 +259,11 @@ block_low_memory_install
 efi="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
 declare -A mount
 while read -r device path; do
-    mount["$device"]="-o bind,ro $path"
+    mount["$device"]="$path"
 done < <(lsblk -o PATH,MOUNTPOINTS -nQ 'PARTTYPE=="'$efi'" && MOUNTPOINTS' 2> /dev/null || true)
 
 for device in $(lsblk -o PATH -nQ 'PARTTYPE=="'$efi'" && !MOUNTPOINTS' 2> /dev/null || true); do
-    mount["$device"]="-o ro -t vfat $device"
+    mount["$device"]=""
 done
 
 export mnt=$(mktemp -d)
@@ -271,9 +271,14 @@ trap "rmdir '$mnt'" EXIT
 
 for device in "${!mount[@]}"; do
     export device
+    export src="${mount[$device]}"
     export BAZZITE_INSTALLER_LOCALE="${LC_MESSAGES:-${LANG:-C}}"
     msg=$(sudo -E unshare -m sh -c '
-        mount '"${mount[$device]} '$mnt'"' 2> /dev/null || exit 0
+        if [ -n "$src" ]; then
+            mount -o bind,ro "$src" "$mnt"
+        else
+            mount -o ro -t vfat "$device" "$mnt"
+        fi 2> /dev/null || exit 0
         shopt -s nullglob nocaseglob
         for dir in "$mnt"/EFI/*; do
             [ -d "$dir" ] || continue
