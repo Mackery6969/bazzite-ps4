@@ -50,6 +50,9 @@ add_wifi_ps4() {
     read -r -s -p "  Password: " pass
     echo
     [[ -n "${ssid}" && -n "${pass}" ]] || { echo "  Skipping WiFi: name and password are required."; return 0; }
+    # NetworkManager reads keyfile values with GKeyFile, where \ starts an escape
+    user="${user//\\/\\\\}"
+    pass="${pass//\\/\\\\}"
 
     conn="[connection]
 id=${ssid}
