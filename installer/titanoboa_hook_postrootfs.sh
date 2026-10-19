@@ -32,7 +32,7 @@ echo "Bazzite release $VERSION_ID ($VERSION_CODENAME)" >/etc/system-release
 
 # Secureboot Key Fetch
 mkdir -p /usr/share/ublue-os
-curl -Lo /usr/share/ublue-os/sb_pubkey.der "$sbkey"
+curl -fLo /usr/share/ublue-os/sb_pubkey.der "$sbkey"
 
 # Default Kickstart
 cat <<EOF >>/usr/share/anaconda/interactive-defaults.ks
