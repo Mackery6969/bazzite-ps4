@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   fix:
-    uses: Mackery6969/Claude-Autofix/.github/workflows/run.yml@924f2cc9d28b556144d0a7d30448ae2c2396967c # v3
+    uses: Mackery6969/Claude-Autofix/.github/workflows/run.yml@v3
     with:
       hub-url: https://claude-autofix-hub.davishayden32.workers.dev
       task: fix
